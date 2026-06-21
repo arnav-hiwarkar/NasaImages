@@ -10,10 +10,9 @@ NASA_SEARCH_API = "https://images-api.nasa.gov/search"
 NASA_ASSET_API = "https://images-api.nasa.gov/asset"
 
 DOWNLOAD_DIR = "nasa_wallpapers"
-MAX_IMAGES = 200         
-MAX_CONCURRENT_REQUESTS = 20   
+MAX_IMAGES = 200          
+MAX_CONCURRENT_REQUESTS = 20  #i mean i didnt se anuthing on nasas api page but owuld like to be nice, i am downlaoding for free lol
 REQUEST_TIMEOUT = 60
-
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
@@ -22,15 +21,28 @@ HEADERS = {
 
 
 def sanitize_filename(name):
-    return re.sub(r'[<>:"/\\|?*]', "_", name)[:150] 
-
+    return re.sub(r'[<>:"/\\|?*]', "_", name)[:150]  
 
 def get_search_results(query, max_images=20):
-    params = {"q": query, "media_type": "image"}
-    response = requests.get(NASA_SEARCH_API, params=params, headers=HEADERS, timeout=30)
-    response.raise_for_status()
-    items = response.json()["collection"]["items"]
-    return items[:max_images]
+    """NASA's search API caps each page at 100 results, so to get more than
+    100 we have to walk through page=1, page=2, ... until we have enough
+    or the API stops returning new items."""
+    all_items = []
+    page = 1
+
+    while len(all_items) < max_images:
+        params = {"q": query, "media_type": "image", "page": page}
+        response = requests.get(NASA_SEARCH_API, params=params, headers=HEADERS, timeout=30)
+        response.raise_for_status()
+        items = response.json()["collection"]["items"]
+
+        if not items:
+            break  
+
+        all_items.extend(items)
+        page += 1
+
+    return all_items[:max_images]
 
 
 def get_highest_resolution_asset_sync(nasa_id):
@@ -53,7 +65,6 @@ def get_highest_resolution_asset_sync(nasa_id):
     if not image_urls:
         return None
 
-   
     image_urls.sort()
     return image_urls[-1]
 
@@ -82,7 +93,6 @@ async def download_file(session, url, filepath, semaphore):
             return True
         except Exception as e:
             print(f"  Error downloading {url}: {e}")
-
             if os.path.exists(filepath):
                 os.remove(filepath)
             return False
@@ -94,7 +104,6 @@ async def process_item(session, item, semaphore, results_list, loop, executor):
         title = data.get("title", "NASA_Image")
         nasa_id = data["nasa_id"]
 
-        
         async with semaphore:
             image_url = await loop.run_in_executor(
                 executor, get_highest_resolution_asset_sync, nasa_id
@@ -122,7 +131,6 @@ async def process_item(session, item, semaphore, results_list, loop, executor):
 async def run(query, max_images):
     os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-    
     results = get_search_results(query, max_images)
     print(f"Found {len(results)} candidate images.\n")
 
@@ -138,7 +146,6 @@ async def run(query, max_images):
             for item in results
         ]
 
-        
         await asyncio.gather(*tasks)
 
         downloaded = sum(1 for o in outcomes if o)
