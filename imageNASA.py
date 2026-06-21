@@ -11,8 +11,9 @@ NASA_ASSET_API = "https://images-api.nasa.gov/asset"
 
 DOWNLOAD_DIR = "nasa_wallpapers"
 MAX_IMAGES = 200          
-MAX_CONCURRENT_REQUESTS = 20  #i mean i didnt se anuthing on nasas api page but owuld like to be nice, i am downlaoding for free lol
+MAX_CONCURRENT_REQUESTS = 50  
 REQUEST_TIMEOUT = 60
+
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
@@ -22,6 +23,7 @@ HEADERS = {
 
 def sanitize_filename(name):
     return re.sub(r'[<>:"/\\|?*]', "_", name)[:150]  
+
 
 def get_search_results(query, max_images=20):
     """NASA's search API caps each page at 100 results, so to get more than
@@ -37,7 +39,7 @@ def get_search_results(query, max_images=20):
         items = response.json()["collection"]["items"]
 
         if not items:
-            break  
+            break  # no more pages
 
         all_items.extend(items)
         page += 1
@@ -65,8 +67,17 @@ def get_highest_resolution_asset_sync(nasa_id):
     if not image_urls:
         return None
 
-    image_urls.sort()
-    return image_urls[-1]
+    SIZE_PRIORITY = ["~orig", "~large", "~medium", "~small", "~thumb"]
+
+    def rank(url):
+        lower = url.lower()
+        for i, tag in enumerate(SIZE_PRIORITY):
+            if tag in lower:
+                return i
+        return len(SIZE_PRIORITY) 
+
+    image_urls.sort(key=rank)
+    return image_urls[0]
 
 
 def unique_filepath(title, extension):
@@ -93,6 +104,7 @@ async def download_file(session, url, filepath, semaphore):
             return True
         except Exception as e:
             print(f"  Error downloading {url}: {e}")
+            # Clean up partial file on failure
             if os.path.exists(filepath):
                 os.remove(filepath)
             return False
@@ -104,6 +116,7 @@ async def process_item(session, item, semaphore, results_list, loop, executor):
         title = data.get("title", "NASA_Image")
         nasa_id = data["nasa_id"]
 
+ 
         async with semaphore:
             image_url = await loop.run_in_executor(
                 executor, get_highest_resolution_asset_sync, nasa_id
